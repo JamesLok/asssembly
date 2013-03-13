@@ -990,6 +990,8 @@ int main(int argc, char **argv)
             
             current_node_in_small_graph = hash_table_insert(element_get_key(element_get_kmer(&db_graph->table[i]),db_graph_small->kmer_size, &tmp_kmer),db_graph_small);
             db_node_set_status(current_node_in_small_graph, none);
+            
+            db_node_update_coverage(current_node_in_small_graph, 0, db_node_get_coverage(&db_graph->table[i], 0));
 
             //forward
             edge = db_node_get_edge_in_specific_person_or_population(&db_graph->table[i], forward, 0);
@@ -1036,67 +1038,190 @@ int main(int argc, char **argv)
     
     
     //dump the small db_graph
-    if (cmd_line->dump_binary==true)
-        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
-							db_graph_small, db_graph_info, BINVERSION);
+//    if (cmd_line->dump_binary==true)
+//        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
+//							db_graph_small, db_graph_info, BINVERSION);
     
     ///////
     
     int count_forward, count_reverse;
-    int total_len = 0;
+
+    // remove bubble
     for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
     {
-        if (!db_node_check_for_flag_ALL_OFF(&db_graph_small->table[i]))
+        if (!db_node_check_for_flag_ALL_OFF(&db_graph_small->table[i]) && db_node_check_status(&db_graph_small->table[i], none))
         {
             
             count_forward = count_num_of_edges_all_colours(&db_graph_small->table[i],forward);
             count_reverse = count_num_of_edges_all_colours(&db_graph_small->table[i],reverse);
             //remove bubble
             
-            if (count_forward == 0 && count_reverse == 1)
-            {
-                curr_node = &db_graph_small->table[i];
-                curr_orient = reverse;
-                total_len = 0;
-                do
-                {
-
-                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
-                    
-                    for(n=0;n<4;n++)
-                    {
-                        if ((edge & 1) == 1)
-                        {
-                            nuc = n;
-
-                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
-                            if (next_node == NULL)
-                                die("somthing wrong in small db_graph\n");
-                           
-                        }
+            dBNode* bubble_end_node[2];
+            Orientation bubble_end_orient[2];
+            double bubble_avg_coverage[2];
+            int bubble_n[2];
+            
+            int bubble_index = 0;
+            
+            dBNode* start_node;
+            Orientation start_orient;
+            
+            int n_temp;
+            Nucleotide nuc_temp, reverse_nuc_temp;
+            Edges edge_temp;
+            
                         
-                        edge >>= 1;    
+            if (count_forward == 2)
+            {
+                start_node = &db_graph_small->table[i];
+                start_orient = forward;
+
+                
+                edge = db_node_get_edge_in_specific_person_or_population(start_node, start_orient, 0);
+                    
+                for(n=0;n<4;n++)
+                {
+                    if ((edge & 1) == 1)
+                    {
+                        int bubble_len = 0;
+                        Covg bubble_covg = 0;
+
+
+                        nuc = n;
+
+                        next_node = db_graph_get_next_node_for_specific_person_or_pop(start_node, start_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+
+                        if (next_node == NULL)
+                            die("somthing wrong in small db_graph\n");
+                        
+                        curr_node = next_node;
+                        curr_orient = next_orientation;
+                            
+                        do
+                        {
+                            db_node_set_status(curr_node, visited);
+                            bubble_covg += db_node_get_coverage(curr_node, 0);
+                            bubble_len++;
+                            
+                            edge_temp = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                            for(n_temp=0;n_temp<4;n_temp++)
+                            {
+                                if ((edge_temp & 1) == 1)
+                                {
+                                    nuc_temp = n_temp;
+                                  
+                                    next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc_temp, &reverse_nuc_temp, db_graph_small, 0);
+                                    if (next_node == NULL)
+                                        continue;
+                                    
+                                    
+                                }
+                                
+                                edge_temp >>= 1;    
+                            }
+                            
+                            curr_node = next_node;
+                            curr_orient = next_orientation;
+                            
+                            
+                        }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+                       
+                    
+                        
+                        bubble_end_node[bubble_index] = curr_node;
+                        bubble_end_orient[bubble_index] = curr_orient;
+                        bubble_avg_coverage[bubble_index] = (float)bubble_covg/bubble_len;
+                        bubble_n[bubble_index] = n;
+                        bubble_index++;
                     }
                     
-                    db_node_update_coverage(curr_node, 0, total_len);
-                    //printf("%d\n", total_len);
-                    total_len++;
+                    edge >>= 1;    
+                }
+                    
+                
+                //set smaller bubble to be pruned
+                if ((bubble_end_node[0] == bubble_end_node[1]) && (bubble_end_orient[0] == bubble_end_orient[1]))
+                {
+                    printf("Bubble found! Keep the one with larger coverage!\n");
+                    
+                    if (bubble_avg_coverage[0] > bubble_avg_coverage[1])
+                        nuc = bubble_n[1];
+                    else
+                        nuc = bubble_n[0];
+                        
+                    
+                    next_node = db_graph_get_next_node_for_specific_person_or_pop(start_node, start_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                    
                     curr_node = next_node;
                     curr_orient = next_orientation;
                     
+                    do
+                    {
+                        db_node_set_status(curr_node, pruned);
+                        
+                        edge_temp = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                        for(n_temp=0;n_temp<4;n_temp++)
+                        {
+                            if ((edge_temp & 1) == 1)
+                            {
+                                nuc_temp = n_temp;
+                              
+                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc_temp, &reverse_nuc_temp, db_graph_small, 0);
+                                if (next_node == NULL)
+                                    continue;
+                                
+                                
+                            }
+                            
+                            edge_temp >>= 1;    
+                        }
+                        
+                        curr_node = next_node;
+                        curr_orient = next_orientation;
+                        
+                        
+                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+                
                     
-                }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
                 
-                printf("%d\n", total_len);
-                
-                
+                    
+                    db_node_set_status(curr_node, visited);
+                    db_node_set_status(start_node, visited);
+                    
+                }
               
             }
 //            printf("fwd = %d, rev = %d\n", count_forward, count_reverse);
         }
     }
     
+    //health check
+    db_graph_health_check(true, db_graph_small);
+    hash_table_traverse(&db_node_set_status_to_none, hash_table);
+    
+    //dump the small db_graph
+    if (cmd_line->dump_binary==true)
+        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
+							db_graph_small, db_graph_info, BINVERSION);
     
     
-    printf("total_len = %d\n", total_len);
+  // remove small tips
+    int count_len = 0;
+    
+    for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
+    {
+        if (!db_node_check_for_flag_ALL_OFF(&db_graph_small->table[i]) && db_node_check_status(&db_graph_small->table[i], none))
+        {
+            
+            count_forward = count_num_of_edges_all_colours(&db_graph_small->table[i],forward);
+            count_reverse = count_num_of_edges_all_colours(&db_graph_small->table[i],reverse);    
+            if (count_forward==1 && count_reverse == 0)
+            {
+                
+                
+            }
+        }
+    }
+    
+
 }
