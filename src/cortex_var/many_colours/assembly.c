@@ -645,8 +645,7 @@ boolean get_one_supernode_and_prepare_for_next(Element **pcurr_node, Orientation
 
 
 
-
-double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * start_node, Orientation start_orient, int color, boolean *cycle_detected, int *contig_length)
+Covg walk_through_graph(dBGraph* db_graph, dBNode * start_node, Orientation start_orient, int color, boolean *cycle_detected, int *contig_length)
 {
     dBNode * curr_node = start_node;
     Orientation curr_orient = start_orient;
@@ -666,21 +665,29 @@ double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * s
    
     *cycle_detected = false;
     *contig_length = 0;
-    dBNode *next_node_in_cycle, *cycle_out_node;
+    dBNode *next_node_in_cycle = NULL, *cycle_out_node = NULL;
     Orientation next_orient_in_cycle, cycle_out_orient;
     
     
     dBNode * current_node_in_small_graph  = NULL;
     BinaryKmer tmp_kmer, next_kmer;
+    
+    Covg curr_node_covg;
         
-    while ((edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, color)) && !(db_node_check_status(curr_node,visited) || db_node_check_status(curr_node,special_visited)))
+    while ((edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, color)) && db_node_check_status(curr_node,none) )
     {
+        curr_node_covg = db_node_get_coverage(curr_node, color);
+        
+        if (curr_node_covg < 10)
+            break;
         
         (*contig_length) = (*contig_length) + 1;
-        sum_coverage += db_node_get_coverage(curr_node, color);
-        
+        sum_coverage += curr_node_covg;
+
+
         
         max_covg = 0;
+        temp_max_covg_node = NULL;
         for(n=0;n<4;n++)
         {
             if ((edge & 1) == 1)
@@ -688,6 +695,8 @@ double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * s
                 nuc = n;
               
                 next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph, color);
+                if (next_node == NULL)
+                    continue;
                 temp_max_covg = db_node_get_coverage(next_node, color);
                 if (temp_max_covg > max_covg)
                 {
@@ -703,19 +712,24 @@ double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * s
         
         db_node_set_status(curr_node,visited);
         
+        if (temp_max_covg_node == NULL)
+            break;
         //if a cycle is detected
         if (db_node_check_status(temp_max_covg_node, visited))
         {
+            printf("in cycle\n");
+            
             *cycle_detected = true;
             
             curr_node = temp_max_covg_node;
             curr_orient = temp_next_orient;
             
             max_covg = 0;
-            
-            while (edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, color))
+            printf("curr_node = %p\n", curr_node);
+            _print_kmer_with_orientation(curr_node, db_graph->kmer_size, curr_orient);
+            while (edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, color) && db_node_check_status(curr_node,visited))
             {
-                
+                printf("1\n");
                 for(n=0;n<4;n++)
                 {
                     if ((edge & 1) == 1)
@@ -723,10 +737,13 @@ double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * s
                         nuc = n;
                       
                         next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph, color);
+                        printf("next_node = %p\n", next_node);
+                        _print_kmer_with_orientation(next_node, db_graph->kmer_size, next_orientation);
                         if (db_node_check_status(next_node, visited) || db_node_check_status(next_node, special_visited))
                         {
                             next_node_in_cycle = next_node;
                             next_orient_in_cycle = next_orientation;
+                            
                             continue;
                         }
                         
@@ -746,11 +763,12 @@ double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * s
                     
                     edge >>= 1;    
                 }
-                
+                printf("2\n");
+                printf("next_node_in_cycle = %p\n", next_node_in_cycle);
                 assert(db_node_check_status(next_node_in_cycle, visited) || db_node_check_status(next_node_in_cycle, special_visited));
-                
+                printf("3\n");
                 db_node_set_status(curr_node,special_visited);
-                
+                printf("4\n");
                 if (db_node_check_status(next_node_in_cycle, special_visited))
                 {
                     curr_node = cycle_out_node;
@@ -767,34 +785,33 @@ double walk_through_graph(dBGraph* db_graph, dBGraph* db_graph_small, dBNode * s
                 
 
         
-        current_node_in_small_graph = hash_table_insert(element_get_key(element_get_kmer(curr_node),db_graph_small->kmer_size, &tmp_kmer),db_graph_small);
-
-        
-        binary_kmer_assignment_operator(next_kmer, temp_max_covg_node->kmer);
-
-        
-        if (temp_next_orient == reverse){
-           binary_kmer_assignment_operator(next_kmer, *(binary_kmer_reverse_complement(&next_kmer,db_graph_small->kmer_size, &tmp_kmer)));
-        }
-        
-        db_node_add_labeled_edge(current_node_in_small_graph, curr_orient, binary_kmer_get_last_nucleotide(&next_kmer), color);
-        
-        
-        if (db_node_check_status(curr_node, visited))
-            db_node_set_status(current_node_in_small_graph, none);
-        else if (db_node_check_status(curr_node, special_visited))
-            db_node_set_status(current_node_in_small_graph, special_none);
+        //current_node_in_small_graph = hash_table_insert(element_get_key(element_get_kmer(curr_node),db_graph_small->kmer_size, &tmp_kmer),db_graph_small);
+        //
+        //
+        //binary_kmer_assignment_operator(next_kmer, temp_max_covg_node->kmer);
+        //
+        //
+        //if (temp_next_orient == reverse){
+        //   binary_kmer_assignment_operator(next_kmer, *(binary_kmer_reverse_complement(&next_kmer,db_graph_small->kmer_size, &tmp_kmer)));
+        //}
+        //
+        //db_node_add_labeled_edge(current_node_in_small_graph, curr_orient, binary_kmer_get_last_nucleotide(&next_kmer), color);
+        //
+        //
+        //if (db_node_check_status(curr_node, visited))
+        //    db_node_set_status(current_node_in_small_graph, none);
+        //else if (db_node_check_status(curr_node, special_visited))
+        //    db_node_set_status(current_node_in_small_graph, special_none);
         
         curr_node = temp_max_covg_node;
         curr_orient = temp_next_orient;
         
-        printf("%c\t%d\t%d\t%d\n", binary_nucleotide_to_char(binary_kmer_get_last_nucleotide(&next_kmer)), max_covg, *contig_length, sum_coverage);
+        //printf("%c\t%d\t%d\t%d\n", binary_nucleotide_to_char(binary_kmer_get_last_nucleotide(&next_kmer)), max_covg, *contig_length, sum_coverage);
 //        _print_kmer_with_orientation(curr_node, db_graph->kmer_size, curr_orient);
     }
     
-    printf("lsum_covg = %d\n", sum_coverage);
     
-    return ((float)sum_coverage/(float)*contig_length);
+    return (sum_coverage);
     
     
 
@@ -871,22 +888,85 @@ int main(int argc, char **argv)
     Covg temp_max, covg_max = 0;
     int index_max_covg = 0;
     
+    int num_small_contig = 0;
+    dBNode * curr_node ;
+    Orientation curr_orient;
     
-    for(i=0;i < db_graph->number_buckets * db_graph->bucket_size;i++)
+    while(true)
     {
-      if (!db_node_check_for_flag_ALL_OFF(&db_graph->table[i]))
-      {
-        temp_max = db_node_get_coverage(&db_graph->table[i], 0);
-        if (covg_max < temp_max)
+        covg_max = 0;
+        for(i=0;i < db_graph->number_buckets * db_graph->bucket_size;i++)
         {
-          covg_max = temp_max;
-          index_max_covg = i;
+          if (!db_node_check_for_flag_ALL_OFF(&db_graph->table[i]) && db_node_check_status(&db_graph->table[i],none))
+          {
+            
+            temp_max = db_node_get_coverage(&db_graph->table[i], 0);
+            if (covg_max < temp_max)
+            {
+              covg_max = temp_max;
+              index_max_covg = i;
+            }
+          }  
         }
-      }  
+        printf("finish search\n");
+        curr_node = &db_graph->table[index_max_covg];
+        
+        
+        
+        int contig_length_forward, contig_length_reverse;
+        Covg sum_covg_forward, sum_covg_reverse;
+        boolean cycle_detected;
+        
+        
+        char curr_node_status;
+        
+        sum_covg_forward = walk_through_graph(db_graph, curr_node, forward, 0, &cycle_detected, &contig_length_forward);
+//        printf("length = %d, avg_covg = %f\n",contig_length_forward, avg_covg_forward);
+        curr_node_status = curr_node->status;
+        
+        db_node_set_status(curr_node,none);
+        printf("finish forward\n");
+
+        sum_covg_reverse = walk_through_graph(db_graph, curr_node, reverse, 0, &cycle_detected, &contig_length_reverse);
+//        printf("length = %d, avg_covg = %f\n",contig_length_reverse, avg_covg_reverse);
+        
+        printf("finish reverse\n");
+        
+        if (curr_node_status == special_visited)
+            db_node_set_status(curr_node,special_visited);
+        else if (db_node_check_status(curr_node,none))
+            db_node_set_status(curr_node,visited);
+            
+            
+        int contig_length = contig_length_forward + contig_length_reverse - 1;
+        double avg_covg = (sum_covg_reverse + sum_covg_forward - db_node_get_coverage(curr_node, 0))/(double)(contig_length);
+        
+        printf("length = %d, avg_covg = %f\n",contig_length, avg_covg);
+        
+        if (contig_length<kmer_size)
+            num_small_contig++;
+        
+        if (num_small_contig > 10)
+            break;
+        
+        
+        //set the visited nodes status to keep
+        for(i=0;i < db_graph->number_buckets * db_graph->bucket_size;i++)
+        {
+          if (!db_node_check_for_flag_ALL_OFF(&db_graph->table[i]) && !db_node_check_status(&db_graph->table[i],none))
+          {
+            if ((contig_length<kmer_size) && (db_node_check_status(&db_graph->table[i],visited) || db_node_check_status(&db_graph->table[i],special_visited)))
+                db_node_set_status(&db_graph->table[i],pruned);
+            else if (db_node_check_status(&db_graph->table[i],visited))
+                db_node_set_status(&db_graph->table[i],keep);
+            else if (db_node_check_status(&db_graph->table[i],special_visited))
+                db_node_set_status(&db_graph->table[i],special_keep);
+            
+            
+          }  
+        }
+        
     }
-    
-    dBNode * curr_node = &db_graph->table[index_max_covg];
-    
     
     //create a small dB graph to store the possible genome path
     dBGraph * db_graph_small = NULL;
@@ -895,18 +975,128 @@ int main(int argc, char **argv)
     {
         die("Giving up - unable to allocate memory for a small hash table\n");
     }
+    
+    dBNode *next_node, *current_node_in_small_graph;
+    Orientation next_orientation;
+    Nucleotide nuc, reverse_nuc;
+    Edges edge;
+    int n;
+    BinaryKmer tmp_kmer;
+    
+    for(i=0;i < db_graph->number_buckets * db_graph->bucket_size;i++)
+    {
+        if (!db_node_check_for_flag_ALL_OFF(&db_graph->table[i]) && (db_node_check_status(&db_graph->table[i],keep) || db_node_check_status(&db_graph->table[i],special_keep)))
+        {
+            
+            current_node_in_small_graph = hash_table_insert(element_get_key(element_get_kmer(&db_graph->table[i]),db_graph_small->kmer_size, &tmp_kmer),db_graph_small);
+            db_node_set_status(current_node_in_small_graph, none);
 
-    
-    int contig_length;
-    double avg_covg;
-    boolean cycle_detected;
-    
-    
-    avg_covg = walk_through_graph(db_graph, db_graph_small, curr_node, forward, 0, &cycle_detected, &contig_length);
-    printf("length = %d, avg_covg = %f\n",contig_length, avg_covg);
-    db_node_set_status(curr_node,none);
-    avg_covg = walk_through_graph(db_graph, db_graph_small, curr_node, reverse, 0, &cycle_detected, &contig_length);
-    printf("length = %d, avg_covg = %f\n",contig_length, avg_covg);
-    
+            //forward
+            edge = db_node_get_edge_in_specific_person_or_population(&db_graph->table[i], forward, 0);
+            
+            for(n=0;n<4;n++)
+            {
+                if ((edge & 1) == 1)
+                {
+                    nuc = n;
+                  
+                    next_node = db_graph_get_next_node_for_specific_person_or_pop(&db_graph->table[i], forward, &next_orientation, nuc, &reverse_nuc, db_graph, 0);
+                    if (next_node == NULL)
+                        continue;
+                    
+                    if (db_node_check_status(next_node,keep) || db_node_check_status(next_node,special_keep))
+                        db_node_add_labeled_edge(current_node_in_small_graph, forward, nuc, 0);
+                }
+                
+                edge >>= 1;    
+            }
 
+            // reverse       
+            edge = db_node_get_edge_in_specific_person_or_population(&db_graph->table[i], reverse, 0);
+            
+            for(n=0;n<4;n++)
+            {
+                if ((edge & 1) == 1)
+                {
+                    nuc = n;
+                  
+                    next_node = db_graph_get_next_node_for_specific_person_or_pop(&db_graph->table[i], reverse, &next_orientation, nuc, &reverse_nuc, db_graph, 0);
+                    if (next_node == NULL)
+                        continue;
+                    
+                    if (db_node_check_status(next_node,keep) || db_node_check_status(next_node,special_keep))
+                        db_node_add_labeled_edge(current_node_in_small_graph, reverse, nuc, 0);
+                }
+                
+                edge >>= 1;    
+            }        
+      
+        }
+    }
+    
+    
+    //dump the small db_graph
+    if (cmd_line->dump_binary==true)
+        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
+							db_graph_small, db_graph_info, BINVERSION);
+    
+    ///////
+    
+    int count_forward, count_reverse;
+    int total_len = 0;
+    for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
+    {
+        if (!db_node_check_for_flag_ALL_OFF(&db_graph_small->table[i]))
+        {
+            
+            count_forward = count_num_of_edges_all_colours(&db_graph_small->table[i],forward);
+            count_reverse = count_num_of_edges_all_colours(&db_graph_small->table[i],reverse);
+            //remove bubble
+            
+            if (count_forward == 0 && count_reverse == 1)
+            {
+                curr_node = &db_graph_small->table[i];
+                curr_orient = reverse;
+                total_len = 0;
+                do
+                {
+
+                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                    
+                    for(n=0;n<4;n++)
+                    {
+                        if ((edge & 1) == 1)
+                        {
+                            nuc = n;
+
+                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                            if (next_node == NULL)
+                                die("somthing wrong in small db_graph\n");
+                           
+                        }
+                        
+                        edge >>= 1;    
+                    }
+                    
+                    db_node_update_coverage(curr_node, 0, total_len);
+                    //printf("%d\n", total_len);
+                    total_len++;
+                    curr_node = next_node;
+                    curr_orient = next_orientation;
+                    
+                    
+                }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+                
+                printf("%d\n", total_len);
+                
+                
+              
+            }
+//            printf("fwd = %d, rev = %d\n", count_forward, count_reverse);
+        }
+    }
+    
+    
+    
+    printf("total_len = %d\n", total_len);
 }
