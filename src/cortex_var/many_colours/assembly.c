@@ -1036,7 +1036,7 @@ int main(int argc, char **argv)
         }
     }
     
-    
+    db_graph_health_check(true, db_graph_small);
     //dump the small db_graph
 //    if (cmd_line->dump_binary==true)
 //        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
@@ -1155,6 +1155,11 @@ int main(int argc, char **argv)
                     curr_node = next_node;
                     curr_orient = next_orientation;
                     
+                    //reset edges
+                    db_node_reset_edge(start_node,start_orient, nuc, 0);
+                    db_node_reset_edge(next_node,opposite_orientation(next_orientation), reverse_nuc, 0);
+                    
+                    
                     do
                     {
                         db_node_set_status(curr_node, pruned);
@@ -1176,15 +1181,16 @@ int main(int argc, char **argv)
                             edge_temp >>= 1;    
                         }
                         
+                        db_node_reset_edge(curr_node,curr_orient, nuc_temp, 0);
+                        db_node_reset_edge(next_node,opposite_orientation(next_orientation), reverse_nuc_temp, 0);
+                        
                         curr_node = next_node;
                         curr_orient = next_orientation;
                         
                         
                     }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
                 
-                    
-                
-                    
+                 
                     db_node_set_status(curr_node, visited);
                     db_node_set_status(start_node, visited);
                     
@@ -1197,16 +1203,15 @@ int main(int argc, char **argv)
     
     //health check
     db_graph_health_check(true, db_graph_small);
-    hash_table_traverse(&db_node_set_status_to_none, hash_table);
+    hash_table_traverse(&db_node_action_set_status_of_unpruned_to_none, db_graph_small);
     
     //dump the small db_graph
-    if (cmd_line->dump_binary==true)
-        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
-							db_graph_small, db_graph_info, BINVERSION);
+//    if (cmd_line->dump_binary==true)
+//        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
+//							db_graph_small, db_graph_info, BINVERSION);
     
-    
+
   // remove small tips
-    int count_len = 0;
     
     for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
     {
@@ -1215,13 +1220,188 @@ int main(int argc, char **argv)
             
             count_forward = count_num_of_edges_all_colours(&db_graph_small->table[i],forward);
             count_reverse = count_num_of_edges_all_colours(&db_graph_small->table[i],reverse);    
-            if (count_forward==1 && count_reverse == 0)
+            
+            if (count_forward == 0 && count_reverse == 1)
             {
+                int total_len = 0;
+                int total_covg = 0;
+                curr_node = &db_graph_small->table[i];
+                curr_orient = reverse;
+                printf("staring a new one!\n");
+                do
+                {
+                    db_node_set_status(curr_node, visited);
+                    total_covg += db_node_get_coverage(curr_node, 0);
+                    
+                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                    
+                    for(n=0;n<4;n++)
+                    {
+                        if ((edge & 1) == 1)
+                        {
+                            nuc = n;
+
+                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                            if (next_node == NULL)
+                                die("somthing wrong in small db_graph(1)\n");
+                           
+                        }
+                        
+                        edge >>= 1;    
+                    }
+                    
+                    //printf("%d\n", total_len);
+                    total_len++;
+                    curr_node = next_node;
+                    curr_orient = next_orientation;
+                    
+                    
+                }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
                 
                 
+                if (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 2)
+                {
+                    curr_orient = opposite_orientation(curr_orient);
+                    
+                    dBNode *junction_node  = curr_node;
+                    Orientation junction_orient = curr_orient;
+                    
+                    dBNode* junction_next_node[2];
+                    Orientation juntion_next_orient[2];
+                    double juntion_avg_coverage[2];
+                    
+                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+
+                    for(n=0;n<4;n++)
+                    {
+                        if ((edge & 1) == 1)
+                        {
+                            nuc = n;
+
+                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                            if (next_node == NULL)
+                                {printf("total_len = %d\n", total_len); die("somthing wrong in small db_graph(2)\n");}
+                                
+                            if (!db_node_check_status(next_node, visited))
+                            {
+                                curr_node = next_node;
+                                curr_orient = next_orientation;
+                                junction_next_node[1] = next_node;
+                                juntion_next_orient[1] = next_orientation;
+                            }
+                            else if (db_node_check_status(next_node, visited))
+                            {
+                                junction_next_node[0] = next_node;
+                                juntion_next_orient[0] = next_orientation;
+                            }
+                           
+                        }
+                        
+                        edge >>= 1;    
+                    }
+                    // go to another branch
+                    do
+                    {
+                        total_covg -= db_node_get_coverage(curr_node, 0);
+                        db_node_set_status(curr_node, visited);
+                        
+                        edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                        
+                        for(n=0;n<4;n++)
+                        {
+                            if ((edge & 1) == 1)
+                            {
+                                nuc = n;
+    
+                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                                if (next_node == NULL)
+                                    die("somthing wrong in small db_graph(3)\n");
+                               
+                            }
+                            
+                            edge >>= 1;    
+                        }
+                        
+                        //printf("%d\n", total_len);
+                        total_len--;
+                        curr_node = next_node;
+                        curr_orient = next_orientation;
+                        
+
+                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+
+                    
+                    
+                    if (total_len < 0)
+                    {
+                        curr_node = junction_next_node[0];
+                        curr_orient = juntion_next_orient[0];
+                    }
+                    else if ((total_len > 0) && (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 0))
+                    {
+                        curr_node = junction_next_node[1];
+                        curr_orient = juntion_next_orient[1];
+                    }
+                    else if ((total_len == 0) && (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 0))
+                    {
+                        if (total_covg >= 0)
+                        {
+                            curr_node = junction_next_node[0];
+                            curr_orient = juntion_next_orient[0];
+                        }
+                        else if (total_covg < 0)
+                        {
+                            curr_node = junction_next_node[1];
+                            curr_orient = juntion_next_orient[1];
+                        }
+                    }
+                    
+                    
+                    
+                    do
+                    {
+                        db_node_set_status(curr_node, pruned);
+                        
+                        edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                        
+                        for(n=0;n<4;n++)
+                        {
+                            if ((edge & 1) == 1)
+                            {
+                                nuc = n;
+    
+                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                                if (next_node == NULL)
+                                    die("somthing wrong in small db_graph(4)\n");
+                               
+                            }
+                            
+                            edge >>= 1;    
+                        }
+                        
+                        curr_node = next_node;
+                        curr_orient = next_orientation;
+
+                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+                    
+                    
+
+                    
+                }
+                printf("%d\n", total_len);
+//                db_graph_health_check(true, db_graph_small);
+                
+              
             }
         }
     }
     
+//    db_graph_health_check(true, db_graph_small);
+    hash_table_traverse(&db_node_action_set_status_of_unpruned_to_none, db_graph_small);
+
+    //dump the small db_graph
+    if (cmd_line->dump_binary==true)
+        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
+							db_graph_small, db_graph_info, BINVERSION);    
 
 }
