@@ -644,6 +644,242 @@ boolean get_one_supernode_and_prepare_for_next(Element **pcurr_node, Orientation
 }
 
 
+void reduce_bubble_to_one_path(dBGraph* db_graph_small, Orientation tip_orient)
+{
+    int i;
+    int count_forward, count_reverse;
+    int next_node_in, next_node_out;
+}
+
+void remove_shorter_tips(dBGraph* db_graph_small, Orientation tip_orient)
+{
+    int i;
+    int count_forward, count_reverse;
+    int next_node_in, next_node_out;
+    
+    dBNode *curr_node, *next_node;
+    Orientation curr_orient, next_orientation;
+    Nucleotide nuc, reverse_nuc;
+    Edges edge;
+    int n;
+    
+    
+    for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
+    {
+        if (!db_node_check_for_flag_ALL_OFF(&db_graph_small->table[i]) && db_node_check_status(&db_graph_small->table[i], none))
+        {
+            
+            count_forward = count_num_of_edges_all_colours(&db_graph_small->table[i],forward);
+            count_reverse = count_num_of_edges_all_colours(&db_graph_small->table[i],reverse);    
+            
+            if ((count_forward == 0 && count_reverse == 1 && tip_orient == reverse) || (count_forward == 1 && count_reverse == 0 && tip_orient == forward))
+            {
+                int total_len = 0;
+                int total_covg = 0;
+                curr_node = &db_graph_small->table[i];
+                curr_orient = tip_orient;
+                printf("staring a new one = %d!\n", db_node_get_coverage(curr_node, 0));
+                do
+                {
+                    db_node_set_status(curr_node, visited);
+                    total_covg += db_node_get_coverage(curr_node, 0);
+                    
+                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                    
+                    for(n=0;n<4;n++)
+                    {
+                        if ((edge & 1) == 1)
+                        {
+                            nuc = n;
+
+                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                            if (next_node == NULL)
+                                die("somthing wrong in small db_graph(1)\n");
+                           
+                        }
+                        
+                        edge >>= 1;    
+                    }
+                    
+                    //printf("%d\n", total_len);
+                    total_len++;
+                    //printf("node %p status = %d\n", curr_node, curr_node->status);
+                    //_print_kmer_with_orientation(curr_node, kmer_size, curr_orient);
+                    curr_node = next_node;
+                    curr_orient = next_orientation;
+                    
+                    
+                }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+                
+                printf("finish one branch! total_len = %d\n", total_len);
+                printf("node coverage = %d\n", db_node_get_coverage(curr_node, 0));
+                printf("node_in = %d, node_out = %d\n", count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)), count_num_of_edges_all_colours(curr_node,curr_orient));
+                //_print_kmer_with_orientation(curr_node, kmer_size, curr_orient);
+                if (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 2)
+                {
+                    curr_orient = opposite_orientation(curr_orient);
+                    
+                    dBNode *junction_node  = curr_node;
+                    Orientation junction_orient = curr_orient;
+                    
+                    int junction_nuc[2];
+                    
+                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                    printf("edge = %d\n", edge);
+                    for(n=0;n<4;n++)
+                    {
+                        if ((edge & 1) == 1)
+                        {
+                            nuc = n;
+
+                            next_node = db_graph_get_next_node_for_specific_person_or_pop(junction_node, junction_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                            //printf("next node %p status = %d\n", next_node, next_node->status);
+                            //_print_kmer_with_orientation(next_node, kmer_size, next_orientation);
+                            if (next_node == NULL)
+                                {printf("total_len = %d\n", total_len); die("somthing wrong in small db_graph(2)\n");}
+                                
+                            if (!db_node_check_status(next_node, visited))
+                            {
+                                curr_node = next_node;
+                                curr_orient = next_orientation;
+                                junction_nuc[1] = nuc;
+                            //    printf("not visited, nuc = %d", nuc);
+                                
+                            }
+                            else if (db_node_check_status(next_node, visited))
+                            {
+                                junction_nuc[0] = nuc;
+                            //    printf("junc_nuc = %d\n",nuc);
+                            }
+                           
+                        }
+                        
+                        edge >>= 1;    
+                    }
+                    
+                    printf("finish finding the another direction, node = %d\n", db_node_get_coverage(curr_node, 0));
+                    // go to another branch
+                    do
+                    {
+                        total_covg -= db_node_get_coverage(curr_node, 0);
+                        db_node_set_status(curr_node, visited);
+                        
+                        edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                        
+                        for(n=0;n<4;n++)
+                        {
+                            if ((edge & 1) == 1)
+                            {
+                                nuc = n;
+    
+                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                                if (next_node == NULL)
+                                    die("somthing wrong in small db_graph(3)\n");
+                               
+                            }
+                            
+                            edge >>= 1;    
+                        }
+                        
+                        //printf("%d\n", total_len);
+                        total_len--;
+                        curr_node = next_node;
+                        curr_orient = next_orientation;
+                        
+
+                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+
+                    
+                    printf("finish travelling the other path, node = %d, total_len = %d\n", db_node_get_coverage(curr_node, 0), total_len);
+                    if (total_len < 0)
+                    {
+                        nuc = junction_nuc[0];
+                    }
+                    else if ((total_len > 0) && (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 0))
+                    {
+                        nuc = junction_nuc[1];
+                    }
+                    else if ((total_len == 0) && (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 0))
+                    {
+                        if (total_covg >= 0)
+                        {
+                            nuc = junction_nuc[1];
+                        }
+                        else if (total_covg < 0)
+                        {
+                            nuc = junction_nuc[0];
+                        }
+                    }
+                    else
+                        printf("wrong somewhere\n");
+                        
+                    //printf("junc_nuc = %d\n",nuc);
+                    next_node = db_graph_get_next_node_for_specific_person_or_pop(junction_node, junction_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                    //printf("next_node = %p, total_len = %d\n", next_node, total_len);
+                    
+                    db_node_reset_edge(junction_node,junction_orient, nuc, 0);
+                    db_node_reset_edge(next_node,opposite_orientation(next_orientation), reverse_nuc, 0);
+                    
+                    curr_node = next_node;
+                    curr_orient = next_orientation;
+                    
+                    printf("finish reseting the junction node\n");
+                    
+                    do
+                    {
+                        db_node_set_status(curr_node, pruned);
+                        
+                        edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
+                        
+                        for(n=0;n<4;n++)
+                        {
+                            if ((edge & 1) == 1)
+                            {
+                                nuc = n;
+    
+                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
+                                if (next_node == NULL)
+                                    die("somthing wrong in small db_graph(4)\n");
+                               
+                            }
+                            
+                            edge >>= 1;    
+                        }
+                        
+                        next_node_in = count_num_of_edges_all_colours(next_node,opposite_orientation(next_orientation));
+                        next_node_out = count_num_of_edges_all_colours(next_node,next_orientation);
+                        
+                        db_node_reset_edge(curr_node,curr_orient, nuc, 0);
+                        db_node_reset_edge(next_node,opposite_orientation(next_orientation), reverse_nuc, 0);
+                        
+                        curr_node = next_node;
+                        curr_orient = next_orientation;
+
+                    }while(next_node_in == 1 && next_node_out == 1);
+                    
+                    printf("finish pruned a tip!\n");
+                    
+                    if (next_node_out == 0)
+                        db_node_set_status(curr_node, pruned);
+
+                    
+                }
+                printf("%d\n", total_len);
+                db_graph_health_check(true, db_graph_small);
+                hash_table_traverse(&db_node_action_set_status_of_unpruned_to_none, db_graph_small);
+//                if (total_len == -4366)
+//                {
+//                    if (cmd_line->dump_binary==true)
+//                        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
+//							db_graph_small, db_graph_info, BINVERSION);    
+//                }
+              
+            }
+        }
+    }
+        
+}
+
 
 Covg walk_through_graph(dBGraph* db_graph, dBNode * start_node, Orientation start_orient, int color, boolean *cycle_detected, int *contig_length)
 {
@@ -1045,6 +1281,7 @@ int main(int argc, char **argv)
     ///////
     
     int count_forward, count_reverse;
+    int next_node_in, next_node_out;
 
     // remove bubble
     for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
@@ -1069,6 +1306,7 @@ int main(int argc, char **argv)
             int n_temp;
             Nucleotide nuc_temp, reverse_nuc_temp;
             Edges edge_temp;
+            
             
                         
             if (count_forward == 2)
@@ -1163,7 +1401,6 @@ int main(int argc, char **argv)
                     do
                     {
                         db_node_set_status(curr_node, pruned);
-                        
                         edge_temp = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
                         for(n_temp=0;n_temp<4;n_temp++)
                         {
@@ -1181,14 +1418,18 @@ int main(int argc, char **argv)
                             edge_temp >>= 1;    
                         }
                         
+                        
+                        next_node_in = count_num_of_edges_all_colours(next_node,opposite_orientation(next_orientation));
+                        next_node_out = count_num_of_edges_all_colours(next_node,next_orientation);
+                        
                         db_node_reset_edge(curr_node,curr_orient, nuc_temp, 0);
                         db_node_reset_edge(next_node,opposite_orientation(next_orientation), reverse_nuc_temp, 0);
-                        
+                       
                         curr_node = next_node;
                         curr_orient = next_orientation;
                         
                         
-                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
+                    }while(next_node_in == 1 && next_node_out == 1);
                 
                  
                     db_node_set_status(curr_node, visited);
@@ -1209,196 +1450,17 @@ int main(int argc, char **argv)
 //    if (cmd_line->dump_binary==true)
 //        db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
 //							db_graph_small, db_graph_info, BINVERSION);
-    
+//    
 
   // remove small tips
     
-    for(i=0;i < db_graph_small->number_buckets * db_graph_small->bucket_size;i++)
-    {
-        if (!db_node_check_for_flag_ALL_OFF(&db_graph_small->table[i]) && db_node_check_status(&db_graph_small->table[i], none))
-        {
-            
-            count_forward = count_num_of_edges_all_colours(&db_graph_small->table[i],forward);
-            count_reverse = count_num_of_edges_all_colours(&db_graph_small->table[i],reverse);    
-            
-            if (count_forward == 0 && count_reverse == 1)
-            {
-                int total_len = 0;
-                int total_covg = 0;
-                curr_node = &db_graph_small->table[i];
-                curr_orient = reverse;
-                printf("staring a new one!\n");
-                do
-                {
-                    db_node_set_status(curr_node, visited);
-                    total_covg += db_node_get_coverage(curr_node, 0);
-                    
-                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
-                    
-                    for(n=0;n<4;n++)
-                    {
-                        if ((edge & 1) == 1)
-                        {
-                            nuc = n;
-
-                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
-                            if (next_node == NULL)
-                                die("somthing wrong in small db_graph(1)\n");
-                           
-                        }
-                        
-                        edge >>= 1;    
-                    }
-                    
-                    //printf("%d\n", total_len);
-                    total_len++;
-                    curr_node = next_node;
-                    curr_orient = next_orientation;
-                    
-                    
-                }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
-                
-                
-                if (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 2)
-                {
-                    curr_orient = opposite_orientation(curr_orient);
-                    
-                    dBNode *junction_node  = curr_node;
-                    Orientation junction_orient = curr_orient;
-                    
-                    dBNode* junction_next_node[2];
-                    Orientation juntion_next_orient[2];
-                    double juntion_avg_coverage[2];
-                    
-                    edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
-
-                    for(n=0;n<4;n++)
-                    {
-                        if ((edge & 1) == 1)
-                        {
-                            nuc = n;
-
-                            next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
-                            if (next_node == NULL)
-                                {printf("total_len = %d\n", total_len); die("somthing wrong in small db_graph(2)\n");}
-                                
-                            if (!db_node_check_status(next_node, visited))
-                            {
-                                curr_node = next_node;
-                                curr_orient = next_orientation;
-                                junction_next_node[1] = next_node;
-                                juntion_next_orient[1] = next_orientation;
-                            }
-                            else if (db_node_check_status(next_node, visited))
-                            {
-                                junction_next_node[0] = next_node;
-                                juntion_next_orient[0] = next_orientation;
-                            }
-                           
-                        }
-                        
-                        edge >>= 1;    
-                    }
-                    // go to another branch
-                    do
-                    {
-                        total_covg -= db_node_get_coverage(curr_node, 0);
-                        db_node_set_status(curr_node, visited);
-                        
-                        edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
-                        
-                        for(n=0;n<4;n++)
-                        {
-                            if ((edge & 1) == 1)
-                            {
-                                nuc = n;
+    remove_shorter_tips(db_graph_small, reverse);
+    remove_shorter_tips(db_graph_small, forward);
     
-                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
-                                if (next_node == NULL)
-                                    die("somthing wrong in small db_graph(3)\n");
-                               
-                            }
-                            
-                            edge >>= 1;    
-                        }
-                        
-                        //printf("%d\n", total_len);
-                        total_len--;
-                        curr_node = next_node;
-                        curr_orient = next_orientation;
-                        
 
-                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
-
-                    
-                    
-                    if (total_len < 0)
-                    {
-                        curr_node = junction_next_node[0];
-                        curr_orient = juntion_next_orient[0];
-                    }
-                    else if ((total_len > 0) && (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 0))
-                    {
-                        curr_node = junction_next_node[1];
-                        curr_orient = juntion_next_orient[1];
-                    }
-                    else if ((total_len == 0) && (count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 0))
-                    {
-                        if (total_covg >= 0)
-                        {
-                            curr_node = junction_next_node[0];
-                            curr_orient = juntion_next_orient[0];
-                        }
-                        else if (total_covg < 0)
-                        {
-                            curr_node = junction_next_node[1];
-                            curr_orient = juntion_next_orient[1];
-                        }
-                    }
-                    
-                    
-                    
-                    do
-                    {
-                        db_node_set_status(curr_node, pruned);
-                        
-                        edge = db_node_get_edge_in_specific_person_or_population(curr_node, curr_orient, 0);
-                        
-                        for(n=0;n<4;n++)
-                        {
-                            if ((edge & 1) == 1)
-                            {
-                                nuc = n;
-    
-                                next_node = db_graph_get_next_node_for_specific_person_or_pop(curr_node, curr_orient, &next_orientation, nuc, &reverse_nuc, db_graph_small, 0);
-                                if (next_node == NULL)
-                                    die("somthing wrong in small db_graph(4)\n");
-                               
-                            }
-                            
-                            edge >>= 1;    
-                        }
-                        
-                        curr_node = next_node;
-                        curr_orient = next_orientation;
-
-                    }while(count_num_of_edges_all_colours(curr_node,opposite_orientation(curr_orient)) == 1 && count_num_of_edges_all_colours(curr_node,curr_orient) == 1);
-                    
-                    
-
-                    
-                }
-                printf("%d\n", total_len);
-//                db_graph_health_check(true, db_graph_small);
-                
-              
-            }
-        }
-    }
-    
 //    db_graph_health_check(true, db_graph_small);
+    
     hash_table_traverse(&db_node_action_set_status_of_unpruned_to_none, db_graph_small);
-
     //dump the small db_graph
     if (cmd_line->dump_binary==true)
         db_graph_dump_single_colour_binary_of_colour0(cmd_line->output_binary_filename, &db_node_check_status_not_pruned,
